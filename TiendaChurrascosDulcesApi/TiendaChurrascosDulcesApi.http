@@ -1,0 +1,6 @@
+@TiendaChurrascosDulcesApi_HostAddress = http://localhost:5218
+
+GET {{TiendaChurrascosDulcesApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

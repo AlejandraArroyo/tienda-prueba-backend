@@ -1,0 +1,8 @@
+# Archivos y carpetas que NO deben subirse a GitHub
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.dbmdl
+appsettings.Development.json
