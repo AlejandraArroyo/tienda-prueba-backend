@@ -11,17 +11,18 @@ namespace TiendaChurrascosDulcesApi.Modelos
         [Column("venta_id")]
         public int VentaId { get; set; }
 
-        [Column("combo_id")]
-        public int? ComboId { get; set; } 
-
-        [Column("churrasco_id")]
-        public int? ChurrascoId { get; set; }  
+        [Column("tipo_producto")]
+        public string TipoProducto { get; set; }
 
         [Column("cantidad")]
         public int Cantidad { get; set; }
 
         public Venta? Venta { get; set; }
-        public Combo? Combo { get; set; }
-        public Churrasco? Churrasco { get; set; }
+        [Column("subtotal")]
+        public decimal PrecioUnitario { get; set; }
+
+        [Column("producto_id")]
+        public int ProductoId { get; set; }
+
     }
 }

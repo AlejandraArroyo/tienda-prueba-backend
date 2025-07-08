@@ -284,138 +284,163 @@ app.MapPost("/api/combos", async (ComboDto dto, AppDb db) =>
 
 
 
-app.MapPost("/api/ventas", async (VentaDto dto, AppDb db) =>
+//dash
+app.MapGet("/api/dashboard/getCombos", async (AppDb db) =>
 {
-    if ((dto.Combos == null || !dto.Combos.Any()) && (dto.Churrascos == null || !dto.Churrascos.Any()))
-    {
-        return Results.BadRequest("La venta debe incluir al menos un combo o un churrasco.");
-    }
+    return await db.Combos.ToListAsync();
+});
 
-    Console.WriteLine($"Combos recibidos: {dto.Combos.Count}");
-    Console.WriteLine($"Churrascos recibidos: {dto.Churrascos.Count}");
 
+app.MapGet("/api/dashboard/carnes", async (AppDb db) =>
+{
+    return await db.CarnesInventario.ToListAsync();
+});
+
+app.MapGet("/api/dashboard/dulcesunidad", async (AppDb db) =>
+{
+    return await db.DulcesUnidad
+        .Include(d => d.Dulce)
+        .ToListAsync();
+});
+
+
+app.MapGet("/api/dashboard/total-churrascos", async (AppDb db) =>
+{
+    var total = await db.Churrascos.CountAsync();
+    return Results.Ok(total);
+});
+
+
+
+app.MapGet("/api/dashboard/carne-mas-usada", async (AppDb db) =>
+{
+    var carneMasUsada = await db.Churrascos
+        .GroupBy(c => c.TipoCarneId)
+        .Select(g => new
+        {
+            TipoCarneId = g.Key,
+            Usos = g.Count()
+        })
+        .OrderByDescending(g => g.Usos)
+        .Join(db.TiposCarne,
+              g => g.TipoCarneId,
+              tc => tc.Id,
+              (g, tc) => new { tc.Nombre, g.Usos })
+        .FirstOrDefaultAsync();
+
+    return Results.Ok(carneMasUsada);
+});
+
+
+app.MapPost("/api/ventas", async (VentaDto request, AppDb db) =>
+{
     var venta = new Venta
     {
         FechaHora = DateTime.UtcNow,
-        Total = dto.Total
+        Total = request.Total,
+        Detalles = new List<VentaDetalle>()
     };
 
-    await db.Ventas.AddAsync(venta);
+
+    foreach (var combo in request.Combos)
+    {
+        var comboEntity = await db.Combos.FindAsync(combo.ComboId);
+        if (comboEntity is null) continue;
+
+        venta.Detalles.Add(new VentaDetalle
+        {
+            TipoProducto = "combo",
+            ProductoId = combo.ComboId,
+            Cantidad = combo.Cantidad,
+            PrecioUnitario = comboEntity.Precio * combo.Cantidad
+        });
+    }
+
+
+    foreach (var churrasco in request.Churrascos)
+    {
+        var churrascoEntity = await db.Churrascos.FindAsync(churrasco.ChurrascoId);
+        if (churrascoEntity is null) continue;
+
+        venta.Detalles.Add(new VentaDetalle
+        {
+            TipoProducto = "churrasco",
+            ProductoId = churrasco.ChurrascoId,
+            Cantidad = churrasco.Cantidad,
+            PrecioUnitario = 40 * churrasco.Cantidad
+        });
+    }
+
+    db.Ventas.Add(venta);
     await db.SaveChangesAsync();
 
-    var detalles = new List<VentaDetalle>();
-
-    try
-    {
-  
-        foreach (var combo in dto.Combos)
-        {
-            var comboCompleto = await db.Combos
-                .Include(c => c.Churrascos).ThenInclude(cc => cc.Churrasco)
-                .Include(c => c.DulcesUnidad)
-                .Include(c => c.DulcesCaja)
-                .FirstOrDefaultAsync(c => c.Id == combo.ComboId);
-
-            if (comboCompleto == null)
-                return Results.BadRequest($"Combo con ID {combo.ComboId} no existe.");
-
-            detalles.Add(new VentaDetalle
-            {
-                VentaId = venta.Id,
-                ComboId = combo.ComboId,
-                ChurrascoId = null,
-                Cantidad = combo.Cantidad
-            });
-
-            foreach (var cc in comboCompleto.Churrascos)
-            {
-                var carne = await db.CarnesInventario.FindAsync(cc.Churrasco.TipoCarneId);
-                if (carne == null)
-                    return Results.BadRequest($"No se encontró carne para tipo ID {cc.Churrasco.TipoCarneId}");
-
-                var requerido = cc.Churrasco.Porciones * combo.Cantidad;
-                if (carne.StockLibras < requerido)
-                    return Results.BadRequest($"Stock insuficiente de carne para el combo {combo.ComboId}");
-
-                carne.StockLibras -= requerido;
-            }
-
-            
-            foreach (var du in comboCompleto.DulcesUnidad)
-            {
-                var inventarioUnidad = await db.DulcesUnidad.FirstOrDefaultAsync(d => d.DulceId == du.DulceId);
-                if (inventarioUnidad == null || inventarioUnidad.StockUnidades < du.Cantidad * combo.Cantidad)
-                    return Results.BadRequest($"Stock insuficiente de dulce unidad en combo {combo.ComboId}");
-
-                inventarioUnidad.StockUnidades -= du.Cantidad * combo.Cantidad;
-            }
-
-            
-            foreach (var dc in comboCompleto.DulcesCaja)
-            {
-                var inventarioCaja = await db.DulcesCaja.FirstOrDefaultAsync(d => d.DulceId == dc.DulceId);
-                if (inventarioCaja == null || inventarioCaja.StockCajas < dc.Cantidad * combo.Cantidad)
-                    return Results.BadRequest($"Stock insuficiente de dulce en caja en combo {combo.ComboId}");
-
-                inventarioCaja.StockCajas -= dc.Cantidad * combo.Cantidad;
-            }
-        }
-
-        foreach (var churrasco in dto.Churrascos)
-        {
-            var churrascoEntity = await db.Churrascos.FindAsync(churrasco.ChurrascoId);
-            if (churrascoEntity == null)
-                return Results.BadRequest($"Churrasco con ID {churrasco.ChurrascoId} no encontrado");
-
-            var carne = await db.CarnesInventario.FindAsync(churrascoEntity.TipoCarneId);
-            if (carne == null)
-                return Results.BadRequest($"No se encontró carne para churrasco {churrasco.ChurrascoId}");
-
-            var requerido = churrascoEntity.Porciones * churrasco.Cantidad;
-            if (carne.StockLibras < requerido)
-                return Results.BadRequest($"Stock insuficiente para churrasco {churrasco.ChurrascoId}");
-
-            carne.StockLibras -= requerido;
-
-            detalles.Add(new VentaDetalle
-            {
-                VentaId = venta.Id,
-                ComboId = null,
-                ChurrascoId = churrasco.ChurrascoId,
-                Cantidad = churrasco.Cantidad
-            });
-        }
-
-        if (!detalles.Any())
-            return Results.BadRequest("No se generó ningún detalle válido para la venta.");
-
-        await db.VentaDetalles.AddRangeAsync(detalles);
-        await db.SaveChangesAsync();
-
-        return Results.Ok(new { message = "Venta registrada correctamente", ventaId = venta.Id });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem("Error interno: " + ex.Message);
-    }
+    return Results.Ok(new { mensaje = "Venta registrada correctamente", venta.Id });
 });
 
 
 
-app.MapGet("/api/getCombos", async (AppDb db) =>
+app.MapGet("/api/dashboard/ventas-mensuales", async (AppDb db) =>
 {
-    var combos = await db.Combos
-        .Select(c => new
+    var resumenMensual = await db.Ventas
+        .GroupBy(v => new { v.FechaHora.Year, v.FechaHora.Month })
+        .Select(g => new
         {
-            c.Id,
-            c.Nombre,
-            c.Descripcion,
-            c.Precio
+            Anio = g.Key.Year,
+            Mes = g.Key.Month,
+            Total = g.Sum(v => v.Total)
         })
         .ToListAsync();
 
-    return Results.Ok(combos);
+    var resultado = resumenMensual
+        .OrderBy(r => r.Anio).ThenBy(r => r.Mes)
+        .Select(r => new
+        {
+            Mes = $"{r.Mes:D2}/{r.Anio}",  
+            Total = r.Total
+        });
+
+    return Results.Ok(resultado);
 });
 
 
+
+app.MapGet("/api/dashboard/combos-mas-vendidos", async (AppDb db) =>
+{
+    var topCombos = await db.VentaDetalles
+        .Where(v => v.TipoProducto == "combo")
+        .GroupBy(v => v.ProductoId)
+        .Select(g => new {
+            ComboId = g.Key,
+            Nombre = db.Combos.Where(c => c.Id == g.Key).Select(c => c.Nombre).FirstOrDefault(),
+            TotalVendidos = g.Sum(v => v.Cantidad)
+        })
+        .OrderByDescending(c => c.TotalVendidos)
+        .Take(3)
+        .ToListAsync();
+
+    return Results.Ok(topCombos);
+});
+
+
+
+
+app.MapGet("/api/proveedores", async (AppDb db) =>
+    await db.Proveedores.ToListAsync());
+
+app.MapPost("/api/proveedores", async (Proveedor proveedor, AppDb db) =>
+{
+    db.Proveedores.Add(proveedor);
+    await db.SaveChangesAsync();
+    return Results.Ok(proveedor);
+});
+
+app.MapPut("/api/churrascos/{id}/tiempo", async (int id, TiempoPreparacionDto dto, AppDb db) =>
+{
+    var churrasco = await db.Churrascos.FindAsync(id);
+    if (churrasco is null) return Results.NotFound();
+
+    churrasco.TiempoPreparacionMinutos = dto.Minutos;
+    await db.SaveChangesAsync();
+    return Results.Ok(churrasco);
+});
 app.Run();

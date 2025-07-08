@@ -22,7 +22,8 @@ namespace TiendaChurrascosDulcesApi.Modelos
         [Column("porciones_extra")]
         public int PorcionesExtra { get; set; }
 
-    
+        [Column("tiempo_preparacion_minutos")]
+        public int TiempoPreparacionMinutos { get; set; }
         public ICollection<ChurrascoGuarnicion>? ChurrascosGuarnicion { get; set; }
     }
 }

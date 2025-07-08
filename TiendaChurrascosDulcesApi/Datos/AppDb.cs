@@ -45,8 +45,8 @@ namespace TiendaChurrascosDulcesApi.Datos
 
 
         public DbSet<Venta> Ventas { get; set; }
-        
 
+        public DbSet<Proveedor> Proveedores { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
